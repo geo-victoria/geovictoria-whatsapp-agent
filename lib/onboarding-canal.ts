@@ -14,7 +14,7 @@
 
 import { getKvValue, setKvValue } from "./supabase-persistence-v3"
 import { avisarEquipoInterno } from "./alerta-interna"
-import { altaApiConfigurada, existeEmpresa, crearEmpresaConAdmin } from "./alta-empresa"
+import { altaApiConfigurada, existeEmpresa, crearEmpresaConAdmin, agregarUsuarioAlta } from "./alta-empresa"
 
 // URL de inicio de sesión de la plataforma (GV Avanzado): users.geovictoria.com
 // desde el 01-oct (desarrollo, vía Lalo). Lalo 01-oct, caso
@@ -897,10 +897,88 @@ export async function armarOnboarding(contact: string): Promise<{
       const simulada =
         (await getKvValue("alta_simulada").catch(() => null)) === "on" && (await esContactoPiloto(contact))
       if (altaApiConfigurada()) {
-        const existe = simulada ? { exists: false, name: null } : await existeEmpresa(b.empresa.identificador!, paisAltaChat)
+        // SESIÓN DEL ALTA VIGENTE (contrato 02-oct): la empresa ya se creó en
+        // un intento anterior pero el usuario falló; con la sesión (60 min)
+        // se reintenta SOLO el usuario — volver a crear daría
+        // company_already_exists.
+        const claveSesion = `onb_alta_sesion_${contact}`
+        const sesionPrev = simulada
+          ? null
+          : await getKvValue(claveSesion)
+              .then((v) => (v ? (JSON.parse(v) as { sessionId: string; expiresAtUtc: string; companyId: string; countryCode?: string; countryId?: string }) : null))
+              .catch(() => null)
+        const sesionViva = !!sesionPrev && Date.parse(sesionPrev.expiresAtUtc || "") > Date.now() + 30_000
+        const adminAlta = {
+          nombre: b.admin.nombre!,
+          apellido: b.admin.apellido!,
+          identificador: b.admin.identificador!,
+          email: b.admin.email!,
+          idInterno: b.admin.idInterno,
+        }
+        // Mensajes al cliente por `code` (decidir SIEMPRE por code, nunca por detail).
+        const pedirOtroCorreo = () => ({
+          ok: true as const,
+          mensajeParaProspecto:
+            `Tu empresa ya quedó creada en GeoVictoria 🙌 Pero el correo ${b.admin.email} ya tiene un usuario en la plataforma, así que no puedo usarlo ` +
+            "como acceso del administrador. ¿Me das otro correo para el administrador? Con ese le dejo el acceso al tiro.",
+        })
+        const pedirDatosAdmin = () => ({
+          ok: true as const,
+          mensajeParaProspecto:
+            "Tu empresa ya quedó creada en GeoVictoria 🙌 Pero la plataforma no aceptó los datos del administrador. " +
+            "¿Me confirmas su nombre, apellido, RUT y correo? Con eso le dejo el acceso al tiro.",
+        })
+        const empresaSinAdmin = async (companyId: string, motivo: string) => {
+          await setKvValue(`alta_409_${contact}`, `${b.admin.email} (${motivo}, ${new Date().toISOString()})`).catch(() => {})
+          await avisarEquipoInterno(
+            `⚠️ ALTA ONBOARDING ${ETQ}: la empresa quedó CREADA SIN ADMINISTRADOR (companyId ${companyId}; ${motivo}). ` +
+              `Crear a mano el usuario administrador con ${b.admin.email} y avisarle. Contacto +${contact}.\n${fichaAlta}`,
+          ).catch(() => {})
+          await setKvValue(
+            claveAltaSolicitada(contact),
+            JSON.stringify({ at: new Date().toISOString(), companyId, via: "api", sinAdmin: true }),
+          ).catch(() => {})
+          return {
+            ok: true as const,
+            mensajeParaProspecto:
+              "Tu empresa quedó creada en GeoVictoria 🙌 El acceso del administrador con " +
+              `${b.admin.email} te lo termina de habilitar nuestro equipo — te confirmo por este chat ` +
+              "dentro de 24 horas hábiles. Cualquier duda mientras tanto, aquí estoy.",
+          }
+        }
+        if (sesionPrev && !sesionViva) {
+          await setKvValue(claveSesion, "").catch(() => {})
+          return await empresaSinAdmin(sesionPrev.companyId, "la sesión del alta (60 min) venció antes de reintentar el usuario")
+        }
+        const existe = simulada || sesionViva ? { exists: false, name: null } : await existeEmpresa(b.empresa.identificador!, paisAltaChat)
         if (existe?.exists) return await responderYaExiste(existe.name)
         if (existe && !existe.exists) {
-          const alta = simulada
+          let alta: Awaited<ReturnType<typeof crearEmpresaConAdmin>> | { ok: true; companyId: string; loginUserCreated: boolean; workEmail: string } = sesionViva
+            ? await (async () => {
+                const r = await agregarUsuarioAlta(sesionPrev!.sessionId, adminAlta)
+                if (r.ok) {
+                  await setKvValue(claveSesion, "").catch(() => {})
+                  return {
+                    ok: true as const,
+                    companyId: sesionPrev!.companyId,
+                    loginUserCreated: true,
+                    usuarioCreado: true,
+                    workEmail: r.workEmail,
+                    ...(sesionPrev!.countryCode ? { countryCodeEnviado: sesionPrev!.countryCode } : {}),
+                    ...(sesionPrev!.countryId ? { countryId: sesionPrev!.countryId } : {}),
+                  }
+                }
+                return {
+                  ok: true as const,
+                  companyId: sesionPrev!.companyId,
+                  loginUserCreated: false,
+                  usuarioCreado: false,
+                  errorUsuario: { code: r.code },
+                  sesionAlta: { sessionId: sesionPrev!.sessionId, expiresAtUtc: sesionPrev!.expiresAtUtc },
+                  workEmail: b.admin.email!,
+                }
+              })()
+            : simulada
             ? {
                 ok: true as const,
                 companyId: `SIM-${Date.now()}`,
@@ -910,17 +988,46 @@ export async function armarOnboarding(contact: string): Promise<{
             : await crearEmpresaConAdmin({
             pais: paisAltaChat,
             empresa: { nombre: b.empresa.nombre!, identificador: b.empresa.identificador! },
-            // VickyAppSession: el WhatsApp es el identificador de la
+            // vickyAppSession: el WhatsApp es el identificador de la
             // conversación (pedido de Nicolás, 11-sep).
             sesion: contact,
-            admin: {
-              nombre: b.admin.nombre!,
-              apellido: b.admin.apellido!,
-              identificador: b.admin.identificador!,
-              email: b.admin.email!,
-              idInterno: b.admin.idInterno,
-            },
+            admin: adminAlta,
           })
+          // EMPRESA CREADA, USUARIO NO (200 con `errors`, contrato 02-oct).
+          if (alta.ok && "usuarioCreado" in alta && alta.usuarioCreado === false) {
+            let code = alta.errorUsuario?.code || "internal_error"
+            const sesionAlta = alta.sesionAlta
+            // internal_error → se reintenta UNA vez con la sesión, al tiro.
+            if (code === "internal_error" && sesionAlta?.sessionId) {
+              const r = await agregarUsuarioAlta(sesionAlta.sessionId, adminAlta)
+              if (r.ok) {
+                alta = { ...alta, usuarioCreado: true, loginUserCreated: true, workEmail: r.workEmail, errorUsuario: undefined }
+              } else {
+                code = r.code
+              }
+            }
+            if ("usuarioCreado" in alta && alta.usuarioCreado === false) {
+              const recuperable = (code === "user_already_exists" || code === "invalid_request") && !!sesionAlta?.sessionId
+              if (recuperable) {
+                await setKvValue(
+                  claveSesion,
+                  JSON.stringify({
+                    sessionId: sesionAlta!.sessionId,
+                    expiresAtUtc: sesionAlta!.expiresAtUtc,
+                    companyId: alta.companyId,
+                    ...("countryCodeEnviado" in alta && alta.countryCodeEnviado ? { countryCode: alta.countryCodeEnviado } : {}),
+                    ...("countryId" in alta && alta.countryId ? { countryId: alta.countryId } : {}),
+                  }),
+                ).catch(() => {})
+                await avisarEquipoInterno(
+                  `📧 ALTA ONBOARDING ${ETQ}: empresa creada (companyId ${alta.companyId}) pero el administrador NO (${code}). ` +
+                    `Se le pidieron ${code === "user_already_exists" ? "otro correo" : "los datos del administrador"}; la sesión del alta vence ${sesionAlta!.expiresAtUtc}. Contacto +${contact}.\n${fichaAlta}`,
+                ).catch(() => {})
+                return code === "user_already_exists" ? pedirOtroCorreo() : pedirDatosAdmin()
+              }
+              return await empresaSinAdmin(alta.companyId, `usuario no creado: ${code}`)
+            }
+          }
           // CORREO OCUPADO (28-ago): el correo del admin ya tiene un usuario
           // en la plataforma (409 user_already_exists). NO es "empresa ya
           // existe": el alta queda ABIERTA (sin marcar solicitada) y se le

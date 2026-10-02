@@ -152,8 +152,37 @@ export type AltaEmpresaResultado =
       countryCodeEnviado?: string
       /** `countryId` que devolvió el servicio: vacío = la empresa quedó sin país (UTC 0). */
       countryId?: string
+      /**
+       * CONTRATO 02-oct (Nicolás): un 200 significa que la EMPRESA se creó; el
+       * usuario puede haber fallado (`user: null` + `errors[]`). false = la
+       * empresa existe SIN administrador y hay que reintentar el usuario con
+       * la sesión (`agregarUsuarioAlta`, 60 min, hasta 3 usuarios).
+       */
+      usuarioCreado?: boolean
+      errorUsuario?: { code: string; detail?: string }
+      sesionAlta?: { sessionId: string; expiresAtUtc: string }
     }
-  | { ok: false; error: string; yaExiste?: boolean; correoOcupado?: boolean }
+  | { ok: false; error: string; code?: string; yaExiste?: boolean; correoOcupado?: boolean }
+
+export type ErrorApiAlta = { code: string; step?: string; detail?: string }
+
+/** Primer error del arreglo `errors` de una respuesta 200 (o null si vino vacío). */
+export function primerErrorApi(data: unknown): ErrorApiAlta | null {
+  const errs = (data as { errors?: unknown })?.errors
+  if (!Array.isArray(errs) || !errs.length) return null
+  const e = errs[0] as { code?: unknown; step?: unknown; detail?: unknown }
+  return { code: String(e?.code || "internal_error"), step: e?.step ? String(e.step) : undefined, detail: e?.detail ? String(e.detail) : undefined }
+}
+
+/** `code` de un problem+json (respuesta distinta de 200); "" si no se pudo leer. */
+export function codigoProblema(texto: string): string {
+  try {
+    const j = JSON.parse(texto || "{}") as { code?: unknown }
+    if (j?.code) return String(j.code)
+  } catch { /* no JSON */ }
+  const m = /"code"\s*:\s*"([a-z_]+)"/.exec(texto || "")
+  return m ? m[1] : ""
+}
 
 /** Crea la empresa + su primer administrador. NO consulta exists: ese candado
  * es responsabilidad del caller (consultar-antes-de-crear). */
@@ -186,9 +215,9 @@ export async function crearEmpresaConAdmin(input: AltaEmpresaInput): Promise<Alt
         lastName: input.admin.apellido,
         workEmail: input.admin.email,
       },
-      // La conversación que originó el alta (nombre del parámetro dado por
-      // Nicolás; obligatorio en su API desde el 15-sep). Siempre viaja.
-      VickyAppSession: sesion,
+      // La conversación que originó el alta (obligatoria desde el 15-sep).
+      // Nombre EXACTO del contrato del 02-oct: `vickyAppSession`.
+      vickyAppSession: sesion,
     })
     const texto = await res.text().catch(() => "")
     if (!res.ok) {
@@ -198,11 +227,15 @@ export async function crearEmpresaConAdmin(input: AltaEmpresaInput): Promise<Alt
       // plataforma → se pide otro correo, el alta sigue abierta. El resto
       // (company_already_exists o 409 pelado) = la EMPRESA ya existe →
       // activación al equipo sobre la cuenta existente (caso Cofradía).
-      const correoOcupado = /user_already_exists/.test(texto)
-      const yaExiste = !correoOcupado && (res.status === 409 || /company_already_exists/.test(texto))
+      // Contrato 02-oct: un no-200 significa que NO se creó nada, y el
+      // motivo viene en `code` (problem+json). Se decide por `code`.
+      const code = codigoProblema(texto)
+      const correoOcupado = code === "user_already_exists" || /user_already_exists/.test(texto)
+      const yaExiste = !correoOcupado && (code === "company_already_exists" || res.status === 409 || /company_already_exists/.test(texto))
       return {
         ok: false,
-        error: `El servicio de alta devolvió ${res.status}`,
+        code: code || undefined,
+        error: `El servicio de alta devolvió ${res.status}${code ? ` (${code})` : ""}`,
         ...(yaExiste ? { yaExiste: true } : {}),
         ...(correoOcupado ? { correoOcupado: true } : {}),
       }
@@ -212,8 +245,12 @@ export async function crearEmpresaConAdmin(input: AltaEmpresaInput): Promise<Alt
     // bien. Antes solo se leía companyId, así que un countryId vacío pasaba
     // inadvertido y la empresa quedaba en UTC 0 (marcaciones corridas).
     const data = JSON.parse(texto || "{}") as {
+      sessionId?: string
+      expiresAtUtc?: string
       company?: { companyId?: string | number; name?: string; identifier?: string; countryId?: string | number | null }
-      user?: { loginUserCreated?: boolean; workEmail?: string }
+      user?: { loginUserCreated?: boolean; workEmail?: string; employeeIdentifier?: string } | null
+      usersCreated?: number
+      errors?: unknown[]
     }
     const companyId = String(data?.company?.companyId ?? "")
     if (!companyId) return { ok: false, error: "El alta respondió sin companyId" }
@@ -222,16 +259,68 @@ export async function crearEmpresaConAdmin(input: AltaEmpresaInput): Promise<Alt
     console.log(
       `[alta-empresa] empresa ${companyId} creada · countryCode enviado=${codigoPais} · countryId devuelto=${countryIdTexto || "(vacío)"}`,
     )
+    // 200 con `errors`: la empresa existe, el usuario NO (user: null).
+    const errUsuario = primerErrorApi(data)
+    const usuarioCreado = !errUsuario && !!data?.user
+    if (!usuarioCreado) {
+      console.warn(
+        `[alta-empresa] empresa ${companyId} creada SIN usuario: ${errUsuario?.code || "user null"} ${errUsuario?.detail ? `— ${String(errUsuario.detail).slice(0, 160)}` : ""}`,
+      )
+    }
     return {
       ok: true,
       companyId,
       countryCodeEnviado: codigoPais,
       countryId: countryIdTexto,
-      loginUserCreated: data?.user?.loginUserCreated === true,
+      loginUserCreated: usuarioCreado,
+      usuarioCreado,
+      ...(errUsuario ? { errorUsuario: { code: errUsuario.code, detail: errUsuario.detail } } : !usuarioCreado ? { errorUsuario: { code: "internal_error" } } : {}),
+      ...(data?.sessionId ? { sesionAlta: { sessionId: String(data.sessionId), expiresAtUtc: String(data.expiresAtUtc || "") } } : {}),
       workEmail: String(data?.user?.workEmail || input.admin.email),
     }
   } catch (e) {
     console.warn(`[alta-empresa] company falló:`, e instanceof Error ? e.message : e)
     return { ok: false, error: e instanceof Error ? e.message : "Error de red en el alta" }
+  }
+}
+
+
+/**
+ * AGREGAR / REINTENTAR USUARIO con la sesión del alta (contrato 02-oct):
+ * POST /api/vicky/company/user. La sesión dura 60 min desde el alta y admite
+ * hasta 3 usuarios contando el primero; un intento fallido no consume cupo.
+ */
+export async function agregarUsuarioAlta(
+  sessionId: string,
+  admin: AltaEmpresaInput["admin"],
+): Promise<{ ok: true; workEmail: string; usersCreated?: number } | { ok: false; code: string; error: string }> {
+  if (!sessionId) return { ok: false, code: "session_not_found", error: "Sin sessionId del alta" }
+  try {
+    const res = await llamar("/api/vicky/company/user", {
+      sessionId,
+      user: {
+        nationalIdentifier: identificadorParaAlta(admin.identificador),
+        employeeIdentifier: String(admin.idInterno || "").trim() || identificadorParaAlta(admin.identificador),
+        firstName: admin.nombre,
+        lastName: admin.apellido,
+        workEmail: admin.email,
+      },
+    })
+    const texto = await res.text().catch(() => "")
+    if (!res.ok) {
+      const code = codigoProblema(texto) || "internal_error"
+      console.warn(`[alta-empresa] company/user → ${res.status} ${code}: ${texto.slice(0, 200)}`)
+      return { ok: false, code, error: `El servicio devolvió ${res.status} (${code})` }
+    }
+    const data = JSON.parse(texto || "{}") as { user?: { workEmail?: string } | null; usersCreated?: number; errors?: unknown[] }
+    const err = primerErrorApi(data)
+    if (err || !data?.user) {
+      const code = err?.code || "internal_error"
+      console.warn(`[alta-empresa] company/user sin usuario: ${code} ${err?.detail ? `— ${String(err.detail).slice(0, 160)}` : ""}`)
+      return { ok: false, code, error: `Usuario no creado (${code})` }
+    }
+    return { ok: true, workEmail: String(data.user.workEmail || admin.email), usersCreated: data.usersCreated }
+  } catch (e) {
+    return { ok: false, code: "internal_error", error: e instanceof Error ? e.message : "Error de red" }
   }
 }
