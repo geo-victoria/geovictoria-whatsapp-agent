@@ -130,7 +130,15 @@ export function quitarSaludoInicial(texto: string): string {
  * agradezco", "👍"): al buscar la ÚLTIMA POSTURA del cliente se saltan, porque
  * después de "ya lo resolvimos" viene casi siempre un "gracias de todas
  * formas" y mirar solo ese último mensaje hacía invisible el rechazo. */
-const CORTESIA = /^\s*(muchas\s+gracias|gracias|te\s+agradezco|se\s+agradece|ok(ey|a|as)?|vale|dale|listo|perfecto|bueno|ya|genial|buen[ao]s?\s+(d[ií]as?|tardes|noches)|hasta\s+luego|chao|adi[oó]s|saludos|igualmente)[\s!.,;:]*(\p{Extended_Pictographic}|\p{Emoji_Modifier}|\u200d|\uFE0F|\s)*$/iu
+// Una o VARIAS cortesías seguidas ("Okey gracias", "ok, muchas gracias!"):
+// con una sola palabra permitida, "Okey gracias" contaba como contenido y
+// tapaba el "Nada gracias" anterior (lead Meta Ads de Aleydis, 02-oct).
+const PALABRA_CORTESIA =
+  "(?:muchas\\s+gracias|gracias|te\\s+agradezco|se\\s+agradece|ok(?:ey|ay|a|as|i)?|vale|dale|listo|perfecto|bueno|ya|genial|buen[ao]s?\\s+(?:d[ií]as?|tardes|noches)|hasta\\s+luego|chao|adi[oó]s|saludos|igualmente)"
+const CORTESIA = new RegExp(
+  `^\\s*${PALABRA_CORTESIA}(?:[\\s!.,;:]+${PALABRA_CORTESIA})*[\\s!.,;:]*(\\p{Extended_Pictographic}|\\p{Emoji_Modifier}|\\u200d|\\uFE0F|\\s)*$`,
+  "iu",
+)
 const SOLO_EMOJI = /^[\s\p{Extended_Pictographic}\p{Emoji_Modifier}\u200d\uFE0F]+$/u
 
 /** Señales de que el mensaje ANTERIOR de Vicky fue un toque o una pregunta

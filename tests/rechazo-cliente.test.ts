@@ -248,3 +248,15 @@ describe("caso Juan / AT Contabilidad (26-sep)", () => {
     assert.equal(esRechazoCliente("no es molestia, cuéntame"), false)
   })
 })
+
+test("'Nada gracias' seguido de 'Okey gracias' sigue siendo rechazo (lead Meta Ads 02-oct)", async () => {
+  const { posturaRechazoCliente } = await import("../lib/rechazo-cliente.ts")
+  const h = [
+    { role: "user", content: "¡Hola! Quiero más información." },
+    { role: "assistant", content: "Hola! Soy Vicky de GeoVictoria. Quieres cotizar nuestros servicios o eres cliente y necesitas ayuda?" },
+    { role: "user", content: "Nada gracias" },
+    { role: "assistant", content: "Perfecto! Cualquier cosa que necesites, aquí estoy." },
+    { role: "user", content: "Okey gracias" },
+  ]
+  assert.equal(posturaRechazoCliente(h as never), "no_interesa")
+})
