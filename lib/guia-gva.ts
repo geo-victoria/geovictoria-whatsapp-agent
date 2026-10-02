@@ -13,6 +13,7 @@
  */
 
 import { MANUAL_GVA } from "./manual-gva/texto.ts"
+import { MAPA_PLATAFORMA_GVA } from "./manual-gva/mapa.ts"
 
 const MODELO = (process.env.MODELO_GUIA_GVA || "claude-sonnet-4-5-20250929").trim()
 const NO_ESTA = "NO_ESTA_EN_MANUAL"
@@ -20,15 +21,29 @@ const NO_ESTA = "NO_ESTA_EN_MANUAL"
 const DOCUMENTO_POR_PAIS: Record<string, string> = { cl: "RUT", pe: "DNI o RUC", co: "cédula o NIT", mx: "RFC o CURP" }
 
 function manualCompleto(): string {
-  return MANUAL_GVA.map((c) => `=== CAPÍTULO: ${c.titulo} ===\n${c.texto}`).join("\n\n")
+  return (
+    MANUAL_GVA.map((c) => `=== CAPÍTULO: ${c.titulo} ===\n${c.texto}`).join("\n\n") +
+    "\n\n=== MAPA REAL DE LA PLATAFORMA (recorrido del 29-sep) ===\n" +
+    MAPA_PLATAFORMA_GVA
+  )
+}
+
+/** WhatsApp marca negrita con un asterisco; el modelo a veces usa dos y títulos con #. */
+export function aFormatoWhatsapp(t: string): string {
+  return String(t || "")
+    .replace(/\*\*(.+?)\*\*/g, "*$1*")
+    .replace(/^#{1,6}\s*/gm, "")
+    .trim()
 }
 
 function sistema(pais: string): string {
   const doc = DOCUMENTO_POR_PAIS[pais] || "documento de identidad"
   return (
     "Eres la guía de uso de la plataforma GV Avanzado de GeoVictoria. Abajo tienes su manual oficial " +
-    "completo. Un cliente (administrador de su empresa) hizo una pregunta por WhatsApp. Respóndela SOLO " +
-    "con lo que dice el manual.\n\n" +
+    "completo y, al final, el MAPA REAL de la plataforma (cada pantalla con su ruta y sus campos, " +
+    "recorrido en la plataforma de verdad). Un cliente (administrador de su empresa) hizo una pregunta " +
+    "por WhatsApp. Respóndela SOLO con lo que dicen el manual y el mapa: el manual dice CÓMO se hace; " +
+    "el mapa dice DÓNDE está y qué campos tiene. Si se contradicen en ubicación o campos, manda el mapa.\n\n" +
     "Reglas:\n" +
     "- Paso a paso numerado, con los nombres EXACTOS de menús, íconos, pestañas y botones tal como " +
     "aparecen en el manual. Máximo 7 pasos; si el proceso es más largo, da los primeros 7 y di qué " +
@@ -40,7 +55,8 @@ function sistema(pais: string): string {
     `- El identificador de una persona en este país es su ${doc}; si el manual dice RUT, adáptalo.\n` +
     "- Las capturas del manual son de una empresa de ejemplo ('Interactuemos en Avanzado') y de un " +
     "ambiente de pruebas: JAMÁS cites esos nombres ni datos de ejemplo.\n" +
-    "- No inventes rutas, opciones ni campos que el manual no menciona. Si la respuesta NO está en el " +
+    "- No inventes rutas, opciones ni campos que ni el manual ni el mapa mencionan, ni digas 'normalmente " +
+    "está en…': si no sabes dónde está, no lo afirmes. Si la respuesta NO está en el " +
     `manual, responde exactamente la palabra ${NO_ESTA} en la primera línea y, en la segunda, en una ` +
     "frase, qué parte sí cubre el manual que se le parezca (o nada).\n" +
     "- No hables del manual ni de 'según el documento': responde como quien conoce la plataforma.\n\n" +
@@ -85,7 +101,7 @@ export async function consultarGuiaGva(pregunta: string, opts: { pais?: string; 
     if (texto.startsWith(NO_ESTA)) {
       return { ok: true, encontrado: false, respuesta: texto.slice(NO_ESTA.length).trim() }
     }
-    return { ok: true, encontrado: true, respuesta: texto }
+    return { ok: true, encontrado: true, respuesta: aFormatoWhatsapp(texto) }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   } finally {
