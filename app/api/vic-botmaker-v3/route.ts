@@ -39,6 +39,7 @@ import { consumirCotizacionPendiente } from "@/lib/enviar-cotizacion-wa"
 
 import { transcribirAudio } from "@/lib/transcribe-audio"
 import { contactoEnMudo } from "@/lib/mudo-contacto"
+import { atenderCampanaExterna } from "@/lib/campana-externa"
 import { describirImagen } from "@/lib/describe-image"
 
 import { markUserActivity, confirmMeetingAttendance } from "@/lib/supabase-persistence-v3"
@@ -433,6 +434,16 @@ export async function POST(request: Request): Promise<NextResponse> {
     // proactiva (por eso va ANTES de markUserActivity y resetLoop: un reenvío
     // no debe re-anclar la cadencia y agendarle un toque a los 10 minutos).
     // El mudo lleva su vencimiento adentro y tope de 12 h — ver lib/mudo-contacto.
+    // CAMPAÑA EXTERNA (02-oct): contactos que atiende una persona desde
+    // Botmaker. Vicky guarda el mensaje y no contesta; el chat queda asignado.
+    if ((await atenderCampanaExterna(
+      contact,
+      message,
+      (t) => appendTurnV3(contact, message, t),
+      (fn) => after(() => fn().catch(() => {})),
+    ))) {
+      return NextResponse.json({ reply: "" })
+    }
     if (await contactoEnMudo(contact)) {
       await appendTurnV3(
         contact,

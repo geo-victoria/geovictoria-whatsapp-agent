@@ -32,6 +32,7 @@
  */
 
 import { contactoEnMudo } from "@/lib/mudo-contacto"
+import { atenderCampanaExterna } from "@/lib/campana-externa"
 import { normalizarMensajeEntrante } from "@/lib/respuesta-boton"
 import { NextResponse, after } from "next/server"
 import { guardarOrigenAnuncio, guardarBsuid } from "@/lib/origen-anuncio"
@@ -408,6 +409,16 @@ export async function POST(request: Request): Promise<NextResponse> {
     // MUDO (paridad con Chile, 02-oct, caso Electric World / Mónica): la
     // orden admin de silenciar a Vicky con un contacto la respetaba solo el
     // webhook chileno, y en las líneas de PE/CO/MX Vicky seguía contestando.
+    // CAMPAÑA EXTERNA (02-oct): contactos que atiende una persona desde
+    // Botmaker. Vicky guarda el mensaje y no contesta; el chat queda asignado.
+    if (!simulacion && (await atenderCampanaExterna(
+      contact,
+      message,
+      (t) => appendTurnV3(contact, message, t, "pe"),
+      (fn) => after(() => fn().catch(() => {})),
+    ))) {
+      return NextResponse.json({ reply: "" })
+    }
     if (!simulacion && (await contactoEnMudo(contact))) {
       await appendTurnV3(contact, message, "[Vicky en mudo: mensaje recibido y transcrito, sin respuesta]", "pe").catch(() => {})
       console.log(`[vic-pe] contacto ${contact} EN MUDO — guardado sin responder (${message.length} chars)`)

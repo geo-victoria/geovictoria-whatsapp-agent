@@ -169,6 +169,16 @@ export async function evaluarGateProactividad(
     const { isTestContact, testContactSet } = await import("./funnel-analysis")
     const motivos: string[] = []
 
+    // CAMPAÑA EXTERNA (02-oct): el contacto lo atiende una persona desde
+    // Botmaker. Ningún mensaje nuestro sale, ni proactivo ni "reactivo" (la
+    // excepción de turno de abajo dejaría pasar una presentación de traspaso
+    // a los pocos minutos de que el cliente escribiera). Solo lo transaccional.
+    if (!opts.transaccional) {
+      const { campanaExternaDe } = await import("./campana-externa")
+      const marca = await campanaExternaDe(clean)
+      if (marca) return { permitir: false, motivos: [`campana_externa_${marca.campana}`], reactivo: false }
+    }
+
     // Conversación: ¿turno reactivo? ¿cerrada por opt-out/perdido?
     const conv = (await supa(
       `vic_v3_conversations?contact=eq.${clean}&select=last_user_at,followup_closed_reason&limit=1`,
